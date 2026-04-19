@@ -11,7 +11,7 @@ import jwt            from "jsonwebtoken";
 import cors           from "cors";
 import pg             from "pg";
 import "dotenv/config";
-import { trace, SpanStatusCode }      from "@opentelemetry/api";
+import { trace, SpanStatusCode,metrics }      from "@opentelemetry/api";
 
 /* ─── Config ─────────────────────────────── */
 const PORT       = process.env.PORT       || 3001;
@@ -20,6 +20,19 @@ const ADMIN_PASS = process.env.ADMIN_PASSWORD;      // your chosen password
 const CLIENT_URL = process.env.CLIENT_URL || "https://ticketing.saturday-s.com";
 
 const tracer = trace.getTracer('ticketing-server','1.0.0',);
+const meter = metrics.getMeter('ticketing-server','1.0.0');
+
+const loginCounter = meter.createCounter('auth.login.attempts', { description: "Login Attempts" });
+const ticketUpdateCounter = meter.createCounter('tickets.updates', { description: "Ticket Status Updates" });
+const ticketResetCounter = meter.createCounter('tickets.resets', { description: "Ticket Resets" });
+const activeConnectionsGauge = meter.createObservableGauge('socket.active_connections', { description: "Active Socket Connections" });
+
+let activeConnections = 0;
+activeConnectionsGauge.addCallback((result) => {
+  result.observe(activeConnections);
+});
+
+
 // const opentelemetry = require('@opentelemetry/api');
 
 
@@ -67,10 +80,12 @@ app.post("/auth/login", (req, res) => {
   tracer.startActiveSpan('login', async (span) => {
   try{
   if (req.body.password !== ADMIN_PASS) {
+    loginCounter.add(1, { 'login.success': false });
     return res.status(401).json({ error: "Wrong password" });
   }
   const token = jwt.sign({ role: "admin" }, JWT_SECRET, { expiresIn: "12h" });
   res.json({ token });
+  loginCounter.add(1, { 'login.success': true });
   span.end();
   } catch (err) {
   span.recordException(err);
@@ -131,6 +146,7 @@ try{
   broadcastSpan.end();});
 
   res.json(rows[0]);
+  ticketUpdateCounter.add(1, { 'ticket.status': status });
   span.end();
   } catch (err) {
   span.recordException(err);
@@ -160,6 +176,7 @@ try{
   broadcastSpan.end();});
 
   res.json(rows);
+  ticketResetCounter.add(1);
   span.end();
 }
 catch (err) {
@@ -174,8 +191,12 @@ catch (err) {
 
 /* ─── Socket.io ──────────────────────────── */
 io.on("connection", (socket) => {
+  activeConnections++;
   console.log("Client connected:", socket.id);
-  socket.on("disconnect", () => console.log("Client disconnected:", socket.id));
+  socket.on("disconnect", () => {
+    activeConnections--;
+    console.log("Client disconnected:", socket.id);
+  });
 });
 
 /* ─── Start ──────────────────────────────── */

@@ -115,10 +115,10 @@ try{
   await tracer.startActiveSpan('db_update_ticket', async (dbSpan) => {
   dbSpan.setAttribute('ticket.num', num);
   dbSpan.setAttribute('ticket.status', status);
-  rows = await db.query(
+  ({rows} = await db.query(
     "UPDATE tickets SET status = $1 WHERE num = $2 RETURNING num, status",
     [status, num]
-  );
+  ));
   dbSpan.end();});
 
   if (!rows.length) return res.status(404).json({ error: "Ticket not found" });
@@ -150,7 +150,7 @@ try{
   await tracer.startActiveSpan('db_reset_tickets', async (dbSpan) => {
   dbSpan.setAttribute('action', 'reset_all_tickets');
   await db.query("UPDATE tickets SET status = 'idle'");
-  rows = await db.query("SELECT num, status FROM tickets ORDER BY num");
+  ({rows} = await db.query("SELECT num, status FROM tickets ORDER BY num"));
   dbSpan.end();});
 
   // Broadcast full reset to all Display clients

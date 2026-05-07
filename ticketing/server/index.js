@@ -1,26 +1,21 @@
 // server/index.js
-// Run: node index.js  (or use pm2 for production)
-//
-// Required packages:
-// npm install express pg socket.io jsonwebtoken dotenv cors
-
-import express        from "express";
+import express from "express";
 import { createServer } from "http";
-import { Server }     from "socket.io";
-import jwt            from "jsonwebtoken";
-import cors           from "cors";
-import pg             from "pg";
+import { Server } from "socket.io";
+import jwt from "jsonwebtoken";
+import cors from "cors";
+import pg from "pg";
 import "dotenv/config";
-import { trace, SpanStatusCode,metrics }      from "@opentelemetry/api";
+import { trace, SpanStatusCode, metrics } from "@opentelemetry/api";
 
 /* ─── Config ─────────────────────────────── */
-const PORT       = process.env.PORT       || 3001;
-const JWT_SECRET = process.env.JWT_SECRET;          // long random string
-const ADMIN_PASS = process.env.ADMIN_PASSWORD;      // your chosen password
+const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET;
+const ADMIN_PASS = process.env.ADMIN_PASSWORD;
 const CLIENT_URL = process.env.CLIENT_URL || "https://ticketing.saturday-s.com";
 
-const tracer = trace.getTracer('ticketing-server','1.0.0',);
-const meter = metrics.getMeter('ticketing-server','1.0.0');
+const tracer = trace.getTracer('ticketing-server', '1.0.0');
+const meter = metrics.getMeter('ticketing-server', '1.0.0');
 
 const loginCounter = meter.createCounter('auth.login.attempts', { description: "Login Attempts" });
 const ticketUpdateCounter = meter.createCounter('tickets.updates', { description: "Ticket Status Updates" });
@@ -43,17 +38,17 @@ if (!JWT_SECRET || !ADMIN_PASS) {
 
 /* ─── Database ───────────────────────────── */
 const db = new pg.Pool({
-  host:     process.env.DB_HOST     || "localhost",
-  port:     process.env.DB_PORT     || 5432,
-  database: process.env.DB_NAME     || "ticketing",
-  user:     process.env.DB_USER     || "postgres",
+  host: process.env.DB_HOST || "localhost",
+  port: process.env.DB_PORT || 5432,
+  database: process.env.DB_NAME || "ticketing",
+  user: process.env.DB_USER || "postgres",
   password: process.env.DB_PASSWORD,
 });
 
 /* ─── App setup ──────────────────────────── */
-const app    = express();
+const app = express();
 const server = createServer(app);
-const io     = new Server(server, {
+const io = new Server(server, {
   cors: { origin: CLIENT_URL, credentials: true },
 });
 
@@ -62,7 +57,7 @@ app.use(express.json());
 
 /* ─── Auth middleware ────────────────────── */
 function requireAuth(req, res, next) {
-  const token = req.headers.authorization?.split(" ")[1]; // "Bearer <token>"
+  const token = req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).json({ error: "No token" });
   try {
     req.admin = jwt.verify(token, JWT_SECRET);
@@ -72,127 +67,130 @@ function requireAuth(req, res, next) {
   }
 }
 
+/* ─── Dashboard validation ───────────────── */
+const VALID_DASHBOARDS = ["mumbo", "prata"];
+function requireDashboard(req, res, next) {
+  const { dashboard } = req.params;
+  if (!VALID_DASHBOARDS.includes(dashboard)) {
+    return res.status(400).json({ error: "Invalid dashboard" });
+  }
+  next();
+}
+
 /* ─── Routes ─────────────────────────────── */
 
 // POST /auth/login  { password }  → { token }
-
 app.post("/auth/login", (req, res) => {
   tracer.startActiveSpan('login', async (span) => {
-  try{
-  if (req.body.password !== ADMIN_PASS) {
-    loginCounter.add(1, { 'login.success': false });
-    return res.status(401).json({ error: "Wrong password" });
-  }
-  const token = jwt.sign({ role: "admin" }, JWT_SECRET, { expiresIn: "12h" });
-  res.json({ token });
-  loginCounter.add(1, { 'login.success': true });
-  span.end();
-  } catch (err) {
-  span.recordException(err);
-  span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-  span.end();
-  throw err;
-}
+    try {
+      if (req.body.password !== ADMIN_PASS) {
+        loginCounter.add(1, { 'login.success': false });
+        return res.status(401).json({ error: "Wrong password" });
+      }
+      const token = jwt.sign({ role: "admin" }, JWT_SECRET, { expiresIn: "12h" });
+      res.json({ token });
+      loginCounter.add(1, { 'login.success': true });
+      span.end();
+    } catch (err) {
+      span.recordException(err);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+      span.end();
+      throw err;
+    }
+  });
 });
-});
 
-
-// GET /tickets  → [{ num, status }, ...]
-
-app.get("/tickets", async (_req, res) => {
+// GET /tickets/:dashboard  → [{ num, status }, ...]
+app.get("/tickets/:dashboard", requireDashboard, async (req, res) => {
   tracer.startActiveSpan('get_tickets', async (span) => {
-  try{
-  const { rows } = await db.query("SELECT num, status FROM tickets ORDER BY num");
-  res.json(rows);
-  span.end();
-  } catch (err) {
-  span.recordException(err);
-  span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-  span.end();
-  throw err;
-}
+    try {
+      const { rows } = await db.query(
+        "SELECT num, status FROM tickets WHERE dashboard = $1 ORDER BY num",
+        [req.params.dashboard]
+      );
+      res.json(rows);
+      span.end();
+    } catch (err) {
+      span.recordException(err);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+      span.end();
+      throw err;
+    }
   });
 });
 
-
-// PATCH /tickets/:num  { status }  → updated ticket   (admin only)
-
-app.patch("/tickets/:num", requireAuth, async (req, res) => {
+// PATCH /tickets/:dashboard/:num  { status }  → updated ticket  (admin only)
+app.patch("/tickets/:dashboard/:num", requireAuth, requireDashboard, async (req, res) => {
   tracer.startActiveSpan('update_ticket', async (span) => {
-try{
-  const num    = parseInt(req.params.num, 10);
-  const { status } = req.body;
+    try {
+      const { dashboard } = req.params;
+      const num = parseInt(req.params.num, 10);
+      const { status } = req.body;
 
-  if (!["idle", "preparing", "ready"].includes(status)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
-  let rows;
-  await tracer.startActiveSpan('db_update_ticket', async (dbSpan) => {
-  dbSpan.setAttribute('ticket.num', num);
-  dbSpan.setAttribute('ticket.status', status);
-  ({rows} = await db.query(
-    "UPDATE tickets SET status = $1 WHERE num = $2 RETURNING num, status",
-    [status, num]
-  ));
-  dbSpan.end();});
+      if (!["idle", "preparing", "ready"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status" });
+      }
 
-  if (!rows.length) return res.status(404).json({ error: "Ticket not found" });
+      const { rows } = await db.query(
+        "UPDATE tickets SET status = $1 WHERE dashboard = $2 AND num = $3 RETURNING num, status",
+        [status, dashboard, num]
+      );
 
-  // Broadcast to all Display clients in real time
-  tracer.startActiveSpan('broadcast_ticket_update', async (broadcastSpan) => {
-  broadcastSpan.setAttribute('ticket.num', num);
-  broadcastSpan.setAttribute('ticket.status', status);
-  io.emit("ticket_update", rows[0]);
-  broadcastSpan.end();});
+      if (!rows.length) return res.status(404).json({ error: "Ticket not found" });
 
-  res.json(rows[0]);
-  ticketUpdateCounter.add(1, { 'ticket.status': status });
-  span.end();
-  } catch (err) {
-  span.recordException(err);
-  span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-  span.end();
-  throw err;
-}
-});
-});
+      // Broadcast to display clients on the relevant dashboard room
+      io.to(dashboard).emit("ticket_update", rows[0]);
 
-// POST /tickets/reset  (admin only)
-
-app.post("/tickets/reset", requireAuth, async (_req, res) => {
-  tracer.startActiveSpan('reset_tickets', async (span) => {
-try{
-  let rows;
-  await tracer.startActiveSpan('db_reset_tickets', async (dbSpan) => {
-  dbSpan.setAttribute('action', 'reset_all_tickets');
-  await db.query("UPDATE tickets SET status = 'idle'");
-  ({rows} = await db.query("SELECT num, status FROM tickets ORDER BY num"));
-  dbSpan.end();});
-
-  // Broadcast full reset to all Display clients
-  tracer.startActiveSpan('broadcast_ticket_reset', async (broadcastSpan) => {
-  broadcastSpan.setAttribute('action', 'broadcast_ticket_reset');
-  io.emit("ticket_reset", rows);
-  broadcastSpan.end();});
-
-  res.json(rows);
-  ticketResetCounter.add(1);
-  span.end();
-}
-catch (err) {
-  span.recordException(err);
-  span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-  span.end();
-  throw err;
-}
+      res.json(rows[0]);
+      ticketUpdateCounter.add(1, { 'ticket.status': status, 'dashboard': dashboard });
+      span.end();
+    } catch (err) {
+      span.recordException(err);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+      span.end();
+      throw err;
+    }
   });
 });
 
+// POST /tickets/:dashboard/reset  (admin only)
+app.post("/tickets/:dashboard/reset", requireAuth, requireDashboard, async (req, res) => {
+  tracer.startActiveSpan('reset_tickets', async (span) => {
+    try {
+      const { dashboard } = req.params;
+      await db.query("UPDATE tickets SET status = 'idle' WHERE dashboard = $1", [dashboard]);
+      const { rows } = await db.query(
+        "SELECT num, status FROM tickets WHERE dashboard = $1 ORDER BY num",
+        [dashboard]
+      );
+
+      io.to(dashboard).emit("ticket_reset", rows);
+
+      res.json(rows);
+      ticketResetCounter.add(1, { 'dashboard': dashboard });
+      span.end();
+    } catch (err) {
+      span.recordException(err);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+      span.end();
+      throw err;
+    }
+  });
+});
 
 /* ─── Socket.io ──────────────────────────── */
 io.on("connection", (socket) => {
   activeConnections++;
   console.log("Client connected:", socket.id);
+
+  // Client joins a dashboard room to only receive relevant updates
+  socket.on("join_dashboard", (dashboard) => {
+    if (VALID_DASHBOARDS.includes(dashboard)) {
+      socket.join(dashboard);
+      console.log(`Socket ${socket.id} joined room: ${dashboard}`);
+    }
+  });
+
   socket.on("disconnect", () => {
     activeConnections--;
     console.log("Client disconnected:", socket.id);

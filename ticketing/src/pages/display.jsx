@@ -63,30 +63,23 @@ const STYLES = `
 
 /* ─────────────────────────────────────────────
    HOOK
-   1. Fetches all tickets on mount (HTTP)
-   2. Opens a Socket.io connection
-   3. Patches state on 'ticket_update' (single change)
-   4. Replaces state on 'ticket_reset'  (full reset)
 ───────────────────────────────────────────── */
-function useTickets() {
+function useTickets(dashboard) {
   const [tickets, setTickets] = useState([]);
 
   useEffect(() => {
-    // Initial load
-    getAllTickets().then(setTickets);
+    getAllTickets(dashboard).then(setTickets);
 
-    // Real-time updates from server
     socket.connect();
+    socket.emit("join_dashboard", dashboard);
 
     socket.on("ticket_update", (updated) => {
-      // Single ticket changed — patch just that one
       setTickets((prev) =>
         prev.map((t) => (t.num === updated.num ? updated : t))
       );
     });
 
     socket.on("ticket_reset", (all) => {
-      // Full reset from admin
       setTickets(all);
     });
 
@@ -95,7 +88,7 @@ function useTickets() {
       socket.off("ticket_reset");
       socket.disconnect();
     };
-  }, []);
+  }, [dashboard]);
 
   return { tickets };
 }
@@ -103,18 +96,21 @@ function useTickets() {
 /* ─────────────────────────────────────────────
    COMPONENT
 ───────────────────────────────────────────── */
-export default function DisplayPage() {
-  const { tickets } = useTickets();
+export default function DisplayPage({ dashboard }) {
+  const { tickets } = useTickets(dashboard);
 
   const preparing = tickets.filter((t) => t.status === "preparing");
-  const ready     = tickets.filter((t) => t.status === "ready");
+  const ready = tickets.filter((t) => t.status === "ready");
+
+  // Capitalise first letter for display
+  const name = dashboard.charAt(0).toUpperCase() + dashboard.slice(1);
 
   return (
     <>
       <style>{STYLES}</style>
 
       <nav className="nav">
-        <span className="nav-brand">Orders</span>
+        <span className="nav-brand">{name} Orders</span>
         <span className="nav-chip">Display</span>
       </nav>
 

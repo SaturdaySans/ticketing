@@ -59,26 +59,34 @@ const STYLES = `
   .login-btn:disabled { opacity: .4; cursor: not-allowed; }
   .login-error { font-size: 12px; color: var(--error); margin-top: 10px; text-align: center; }
 
-  /* Admin */
-  .admin { padding: 20px 14px 40px; max-width: 540px; margin: 0 auto; }
-  .legend { display: flex; gap: 14px; margin-bottom: 16px; }
+  /* Admin layout — two dashboards side by side */
+  .admin-wrap { padding: 20px 14px 40px; max-width: 1080px; margin: 0 auto; }
+  .dashboards { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 640px) { .dashboards { grid-template-columns: 1fr; } }
+
+  /* Per-dashboard panel */
+  .dashboard-panel { background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 18px 16px 16px; }
+  .dashboard-title { font-size: 15px; font-weight: 700; letter-spacing: -.3px;
+    margin-bottom: 12px; }
+  .legend { display: flex; gap: 14px; margin-bottom: 12px; }
   .legend-item { display: flex; align-items: center; gap: 5px; }
   .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
   .legend-label { font-size: 11px; color: var(--muted); letter-spacing: .3px; }
   .admin-hint { font-size: 11px; color: var(--muted); text-align: center;
-    margin-bottom: 16px; line-height: 1.5; }
+    margin-bottom: 14px; line-height: 1.5; }
   .admin-grid { display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 10px; margin-bottom: 20px; }
+    gap: 8px; margin-bottom: 16px; }
   .admin-ticket { background: var(--surface); border: 1.5px solid var(--border);
-    border-radius: var(--radius); padding: 14px 8px 12px; display: flex;
-    flex-direction: column; align-items: center; gap: 8px; cursor: pointer;
+    border-radius: var(--radius); padding: 12px 6px 10px; display: flex;
+    flex-direction: column; align-items: center; gap: 6px; cursor: pointer;
     transition: border-color .15s, background .15s, transform .1s;
     -webkit-tap-highlight-color: transparent; }
   .admin-ticket:active { transform: scale(.95); }
   .admin-ticket.disabled { opacity: .5; pointer-events: none; }
   .admin-ticket.preparing { background: var(--preparing-bg); border-color: var(--preparing-border); }
   .admin-ticket.ready     { background: var(--ready-bg);     border-color: var(--ready-border); }
-  .admin-num { font-size: 26px; font-weight: 700; line-height: 1; letter-spacing: -1px; }
+  .admin-num { font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: -1px; }
   .admin-ticket.idle        .admin-num { color: var(--muted); }
   .admin-ticket.preparing   .admin-num { color: var(--preparing-text); }
   .admin-ticket.ready       .admin-num { color: var(--ready-text); }
@@ -87,8 +95,8 @@ const STYLES = `
   .admin-ticket.preparing   .admin-status { color: var(--preparing-text); }
   .admin-ticket.ready       .admin-status { color: var(--ready-text); }
   .reset-btn { width: 100%; background: none; border: 1px solid var(--border);
-    border-radius: var(--radius); font-family: var(--font); font-size: 13px;
-    font-weight: 500; color: var(--muted); padding: 13px; cursor: pointer;
+    border-radius: var(--radius); font-family: var(--font); font-size: 12px;
+    font-weight: 500; color: var(--muted); padding: 11px; cursor: pointer;
     transition: background .15s, color .15s; }
   .reset-btn:hover { background: var(--faint); color: var(--text); }
   .reset-btn:disabled { opacity: .4; cursor: not-allowed; }
@@ -97,16 +105,17 @@ const STYLES = `
 /* ─────────────────────────────────────────────
    CONSTANTS
 ───────────────────────────────────────────── */
-const CYCLE        = { idle: "preparing", preparing: "ready", ready: "idle" };
+const CYCLE = { idle: "preparing", preparing: "ready", ready: "idle" };
 const STATUS_LABEL = { idle: "Idle", preparing: "Prep", ready: "Ready" };
+const DASHBOARDS = ["mumbo", "prata"];
 
 /* ─────────────────────────────────────────────
    LOGIN FORM
 ───────────────────────────────────────────── */
 function LoginForm({ onLogin }) {
   const [password, setPassword] = useState("");
-  const [error,    setError]    = useState("");
-  const [loading,  setLoading]  = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
     if (!password) return;
@@ -150,15 +159,15 @@ function LoginForm({ onLogin }) {
 }
 
 /* ─────────────────────────────────────────────
-   ADMIN PANEL
+   SINGLE DASHBOARD PANEL
 ───────────────────────────────────────────── */
-function AdminPanel({ token, onLogout }) {
+function DashboardPanel({ dashboard, token, onLogout }) {
   const [tickets, setTickets] = useState([]);
-  const [busy,    setBusy]    = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    setTickets(await getAllTickets());
-  }, []);
+    setTickets(await getAllTickets(dashboard));
+  }, [dashboard]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -166,13 +175,10 @@ function AdminPanel({ token, onLogout }) {
     if (busy) return;
     setBusy(true);
     try {
-      const updated = await setTicketStatus(t.num, CYCLE[t.status], token);
-      // Optimistic update — server also broadcasts via Socket.io
-      setTickets((prev) =>
-        prev.map((x) => (x.num === updated.num ? updated : x))
-      );
+      const updated = await setTicketStatus(dashboard, t.num, CYCLE[t.status], token);
+      setTickets((prev) => prev.map((x) => (x.num === updated.num ? updated : x)));
     } catch (err) {
-      if (err.message.includes("401")) onLogout(); // token expired
+      if (err.message.includes("401")) onLogout();
     } finally {
       setBusy(false);
     }
@@ -182,7 +188,7 @@ function AdminPanel({ token, onLogout }) {
     if (busy) return;
     setBusy(true);
     try {
-      setTickets(await resetTickets(token));
+      setTickets(await resetTickets(dashboard, token));
     } catch (err) {
       if (err.message.includes("401")) onLogout();
     } finally {
@@ -190,11 +196,15 @@ function AdminPanel({ token, onLogout }) {
     }
   };
 
+  const name = dashboard.charAt(0).toUpperCase() + dashboard.slice(1);
+
   return (
-    <div className="admin">
+    <div className="dashboard-panel">
+      <div className="dashboard-title">{name}</div>
+
       <div className="legend">
         {[
-          { color: "#ccc",    label: "Idle" },
+          { color: "#ccc", label: "Idle" },
           { color: "#c49a00", label: "Preparing" },
           { color: "#2a8a50", label: "Ready" },
         ].map(({ color, label }) => (
@@ -221,8 +231,23 @@ function AdminPanel({ token, onLogout }) {
       </div>
 
       <button className="reset-btn" onClick={handleReset} disabled={busy}>
-        Reset all tickets
+        Reset {name}
       </button>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   ADMIN PANEL (both dashboards)
+───────────────────────────────────────────── */
+function AdminPanel({ token, onLogout }) {
+  return (
+    <div className="admin-wrap">
+      <div className="dashboards">
+        {DASHBOARDS.map((d) => (
+          <DashboardPanel key={d} dashboard={d} token={token} onLogout={onLogout} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -231,7 +256,6 @@ function AdminPanel({ token, onLogout }) {
    ROOT
 ───────────────────────────────────────────── */
 export default function AdminApp() {
-  // Token lives in memory only — cleared on page refresh (intentional)
   const [token, setToken] = useState(null);
 
   return (

@@ -102,21 +102,15 @@ app.post("/auth/login", (req, res) => {
 
 // GET /tickets/:dashboard  → [{ num, status }, ...]
 app.get("/tickets/:dashboard", requireDashboard, async (req, res) => {
-  tracer.startActiveSpan('get_tickets', async (span) => {
-    try {
-      const { rows } = await db.query(
-        "SELECT num, status FROM tickets WHERE dashboard = $1 ORDER BY num",
-        [req.params.dashboard]
-      );
-      res.json(rows);
-      span.end();
-    } catch (err) {
-      span.recordException(err);
-      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-      span.end();
-      throw err;
-    }
-  });
+  try {
+    const { rows } = await db.query(
+      "SELECT num, status FROM tickets WHERE dashboard = $1 ORDER BY num",
+      [req.params.dashboard]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // PATCH /tickets/:dashboard/:num  { status }  → updated ticket  (admin only)

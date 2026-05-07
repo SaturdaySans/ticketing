@@ -11,11 +11,12 @@
 **Admin Page**: https://ticketing.saturday-s.com/admin (Password: House that starts with S)
 
 Tech Stack:
-- Frontend: (React, JS, TS)
+- Frontend: React, JS, TS
 - Backend: Node.js (Express), PM2
 - Database: PostgreSQL
 - Realtime: Socket.io
-- Monitoring & Observability: Openetelemetry, Grafana, LGTM, Using Tempo for Traces, Mimir/Prometheus for Metrics, K6
+- Monitoring & Observability: OpenTelemetry, Grafana, LGTM, Tempo (Traces), Mimir/Prometheus (Metrics)
+- Load Testing: k6
 - Reverse Proxy: Nginx
 - Infra: Cloudflare, Docker
 - IaC: Terraform
@@ -86,9 +87,9 @@ Socket.io broadcasts updates instantly to connected display clients which are  g
 
 | Metric | Result | Threshold | Status |
 |---|---|---|---|
-| p(95) response time | 399ms | < 800ms | ✅ |
-| Error rate | 3.4% | < 5% | ✅ |
-| p(99) ticket fetch latency | 871ms | < 1500ms | ✅ |
+| p(95) response time | 399ms | < 800ms | yay! |
+| Error rate | 3.4% | < 5% | yay! |
+| p(99) ticket fetch latency | 871ms | < 1500ms | yay! |
  
 **Scenario breakdown**
 - **200 VUs** ramping up polling `GET /tickets/:dashboard` — median response 25ms

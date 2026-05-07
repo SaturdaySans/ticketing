@@ -1,0 +1,62 @@
+services:
+
+  # PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ticketing
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-runs schema
+      - ./ticketing/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ticketing"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Backend 
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ticketing
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+      CLIENT_URL: ${CLIENT_URL}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lgtm:
+        condition: service_started
+
+  # ─── Grafana LGTM (Grafana + Tempo + Prometheus + Loki + OTel Collector) ──
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # Uncomment to persist Prometheus data across restarts:
+      - prometheus_data:/prometheus
+
+volumes:
+  postgres_data:
+  grafana_data:
+  # prometheus_data:

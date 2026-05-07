@@ -4,7 +4,9 @@
 
 - Frontend by claude, everything else by my pet cat (maiself)
 
-**Web Link**: https://ticketing.saturday-s.com
+**Web Link**: 
+- https://ticketing.saturday-s.com/mumbo
+- https://ticketing.saturday-s.com/prata
 
 **Admin Page**: https://ticketing.saturday-s.com/admin (Password: House that starts with S)
 
@@ -13,7 +15,7 @@ Tech Stack:
 - Backend: Node.js (Express), PM2
 - Database: PostgreSQL
 - Realtime: Socket.io
-- Monitoring & Observability: Openetelemetry, Grafana, LGTM, Using Tempo for Traces, Mimir/Prometheus for Metrics
+- Monitoring & Observability: Openetelemetry, Grafana, LGTM, Using Tempo for Traces, Mimir/Prometheus for Metrics, K6
 - Reverse Proxy: Nginx
 - Infra: Cloudflare, Docker
 - IaC: Terraform
@@ -40,18 +42,12 @@ Node.js (Express) Backend [Port 3001]
 
 
 ```sql
--- Users
-CREATE TABLE users (
-  id            SERIAL PRIMARY KEY,
-  username      VARCHAR UNIQUE NOT NULL,
-  email         VARCHAR UNIQUE NOT NULL,
-  password_hash VARCHAR NOT NULL
-);
-
--- Tickets
 CREATE TABLE tickets (
-  num    SERIAL PRIMARY KEY,
-  status VARCHAR NOT NULL DEFAULT 'idle'
+  id        SERIAL PRIMARY KEY,
+  num       INTEGER NOT NULL,
+  dashboard TEXT NOT NULL CHECK (dashboard IN ('mumbo', 'prata')),
+  status    TEXT NOT NULL CHECK (status IN ('idle', 'preparing', 'ready')) DEFAULT 'idle',
+  UNIQUE (num, dashboard)
 );
 ```
 ---
@@ -75,13 +71,31 @@ Data Pipeline
 
 ## Real-time Updates
 
-Socket.io is used to broadcast updates instantly without polling
+Socket.io broadcasts updates instantly to connected display clients which are  grouped by dashboard rooms :D
 
 ### Events
 
 - `ticket_update` — emitted when a ticket status changes  
 - `ticket_reset` — emitted when all tickets are reset
 
+---
+
+## Stress Test
+
+- Tested with [k6](https://k6.io) simulating 710 concurrent virtual users across three scenarios simultaneously: display polling, admin updates, and socket connections
+
+| Metric | Result | Threshold | Status |
+|---|---|---|---|
+| p(95) response time | 399ms | < 800ms | ✅ |
+| Error rate | 3.4% | < 5% | ✅ |
+| p(99) ticket fetch latency | 871ms | < 1500ms | ✅ |
+ 
+**Scenario breakdown**
+- **200 VUs** ramping up polling `GET /tickets/:dashboard` — median response 25ms
+- **10 VUs** hammering admin login + `PATCH /tickets` — 97% success rate
+- **500 VUs** holding concurrent WebSocket connections — handled cleanly
+**Summary**: median API response time of 25ms under full load, server stayed stable throughout. Comfortably handles hundreds of simultaneous display screens.
+ 
 ---
 
 
